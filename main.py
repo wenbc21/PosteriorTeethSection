@@ -75,7 +75,10 @@ def main(args) :
     dicom_dirs = [item.path for item in os.scandir(args.dicom_path) if item.is_dir()]
     dicom_dirs.sort()
     i = 0
-    numbers = [dir.split('\\')[-1].split('_')[0]  for dir in dicom_dirs]
+    # numbers = [dir.split('\\')[-1].split('_')[0]  for dir in dicom_dirs]
+    # 不能用split来划分文件名，
+    # 因为不同系统下的路径分隔可能不一样，改成os.path.split()
+    numbers = [os.path.split(dir)[-1].split('_')[0] for dir in dicom_dirs]
     print(numbers)
 
     os.makedirs(f"{args.results_path}/auxiliary", exist_ok=True)
@@ -85,9 +88,10 @@ def main(args) :
     os.makedirs(f"{args.results_path}/auxiliary", exist_ok=True)
     os.makedirs(f"{args.results_path}/coronal", exist_ok=True)
     
-    for it in range(len(dicom_dirs)) :
+    for i in range(len(dicom_dirs)) :
+    # for i in range(len(numbers)):
         # get dicom file and adjustment value according to window
-        dicom_dir = list([item.path for item in os.scandir(dicom_dirs[it]) if item.is_dir()])[0]
+        dicom_dir = list([item.path for item in os.scandir(dicom_dirs[i]) if item.is_dir()])[0]
         dicom = get_dcm_3d_array(dicom_dir)
         
         # get cross section
@@ -217,7 +221,7 @@ def main(args) :
                 left_int = cross_y - left_coe * x_mid
             else: 
                 print()
-                print(f"Raise error at {it+1} when computing slope!!!")
+                print(f"Raise error at {i+1} when computing slope!!!")
                 print()
                 continue
             
@@ -370,8 +374,7 @@ def main(args) :
             if left_dist_start < right_dist_start:
                 nearest_start_point = sorted_left_points[left_idx_start]
                 plt.plot([start_point[0], nearest_start_point[0]], [start_point[1], nearest_start_point[1]], 'g--')
-            else:
-                if (right_idx_start > 0):
+            elif (right_idx_start > 0):
                     nearest_start_point = sorted_right_points[right_idx_start]
                     plt.plot([start_point[0], nearest_start_point[0]], [start_point[1], nearest_start_point[1]],
                              'g--')
@@ -379,10 +382,9 @@ def main(args) :
             if left_dist_end < right_dist_end:
                 nearest_end_point = sorted_left_points[left_idx_end]
                 plt.plot([end_point[0], nearest_end_point[0]], [end_point[1], nearest_end_point[1]], 'g--')
-            else:
-                if (right_idx_start > 0):
-                    nearest_end_point = sorted_right_points[right_idx_end]
-                    plt.plot([end_point[0], nearest_end_point[0]], [end_point[1], nearest_end_point[1]], 'g--')
+            elif (right_idx_start > 0):
+                nearest_end_point = sorted_right_points[right_idx_end]
+                plt.plot([end_point[0], nearest_end_point[0]], [end_point[1], nearest_end_point[1]], 'g--')
 
             for it in range(section_num):
                 vals_x = np.linspace(left_x_cross[it] - 50, left_x_cross[it] + 50)
