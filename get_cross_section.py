@@ -50,8 +50,8 @@ def get_cross_section(dicom, if_vis, number, results_path) :
         cv2.line(mip_img, (0, cs_num), (mip_img.shape[1], cs_num), (255, 0, 0), 2)
         for coor in ori_coordinates:
             cv2.circle(mip_img, coor[::-1], radius=3, color=(0, 0, 255), thickness=-1)  # 填充圆
-        cv2.imwrite(f"{results_path}/mip/{str(number+1).zfill(4)}_mip.png", mip_img)
-        cv2.imwrite(f"{results_path}/cross_section/{str(number+1).zfill(4)}_cross_section.png", cross_section)
+        cv2.imwrite(f"{results_path}/mip/{str(number).zfill(4)}_mip.png", mip_img)
+        cv2.imwrite(f"{results_path}/cross_section/{str(number).zfill(4)}_cross_section.png", cross_section)
         
     return cross_section
 
