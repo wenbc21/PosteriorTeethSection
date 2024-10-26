@@ -74,12 +74,9 @@ def main(args) :
     
     dicom_dirs = [item.path for item in os.scandir(args.dicom_path) if item.is_dir()]
     dicom_dirs.sort()
-    i = 0
-    # numbers = [dir.split('\\')[-1].split('_')[0]  for dir in dicom_dirs]
-    # 不能用split来划分文件名，
-    # 因为不同系统下的路径分隔可能不一样，改成os.path.split()
+    
     numbers = [os.path.split(dir)[-1].split('_')[0] for dir in dicom_dirs]
-    print(numbers)
+    print(f"patients number: {len(numbers)}")
 
     os.makedirs(f"{args.results_path}/auxiliary", exist_ok=True)
     os.makedirs(f"{args.results_path}/cross_section", exist_ok=True)
@@ -89,7 +86,6 @@ def main(args) :
     os.makedirs(f"{args.results_path}/coronal", exist_ok=True)
     
     for i in range(len(dicom_dirs)) :
-    # for i in range(len(numbers)):
         # get dicom file and adjustment value according to window
         dicom_dir = list([item.path for item in os.scandir(dicom_dirs[i]) if item.is_dir()])[0]
         dicom = get_dcm_3d_array(dicom_dir)
@@ -221,7 +217,7 @@ def main(args) :
                 left_int = cross_y - left_coe * x_mid
             else: 
                 print()
-                print(f"Raise error at {i+1} when computing slope!!!")
+                print(f"Raise error at {str(numbers[i]).zfill(4)} when computing slope!!!")
                 print()
                 continue
             
@@ -386,13 +382,13 @@ def main(args) :
                 nearest_end_point = sorted_right_points[right_idx_end]
                 plt.plot([end_point[0], nearest_end_point[0]], [end_point[1], nearest_end_point[1]], 'g--')
 
-            for it in range(section_num):
-                vals_x = np.linspace(left_x_cross[it] - 50, left_x_cross[it] + 50)
-                left_vals_y = left_intercepts[it] + left_slope * vals_x
+            for sec in range(section_num):
+                vals_x = np.linspace(left_x_cross[sec] - 50, left_x_cross[sec] + 50)
+                left_vals_y = left_intercepts[sec] + left_slope * vals_x
                 plt.plot(vals_x, left_vals_y, '--', c='red')
-            for it in range(section_num):
-                vals_x = np.linspace(right_x_cross[it] - 50, right_x_cross[it] + 50)
-                right_vals_y = right_intercepts[it] + right_slope * vals_x
+            for sec in range(section_num):
+                vals_x = np.linspace(right_x_cross[sec] - 50, right_x_cross[sec] + 50)
+                right_vals_y = right_intercepts[sec] + right_slope * vals_x
                 plt.plot(vals_x, right_vals_y, '--', c='red')
 
             vals_x = np.linspace(0, 512)
@@ -410,12 +406,11 @@ def main(args) :
             # plt.show()
             plt.close()
             
-            
             # 将整个CBCT图像转化到0~255
             dicom = get_dcm_3d_array(dicom_dir)
             dcm_3d_array = window_transform_3d(dicom, window_width=4000, window_center=1000)
             height, depth, width = dcm_3d_array.shape
-            os.makedirs(f"{args.results_path}/coronal/{numbers[i]}", exist_ok=True)
+            os.makedirs(f"{args.results_path}/coronal/{str(numbers[i]).zfill(4)}", exist_ok=True)
             # 获取左侧截面
             for sec in range(section_num):
                 dcm_3d_new = copy.deepcopy(dcm_3d_array)
@@ -442,9 +437,7 @@ def main(args) :
                 os.makedirs(f"{args.results_path}/coronal/{str(numbers[i]).zfill(4)}", exist_ok=True)
                 cv2.imencode(".png", result)[1].tofile(f"{args.results_path}/coronal/{str(numbers[i]).zfill(4)}/right_{sec+1}.png")
 
-        if i < len(numbers):
-            i=i+1
-        print(f"{str(numbers[i-1]).zfill(4)} done! ")
+        print(f"NO. {str(numbers[i]).zfill(4)} done! ")
 
 
 
