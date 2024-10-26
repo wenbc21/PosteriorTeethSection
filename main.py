@@ -18,7 +18,8 @@ from get_cross_section import get_cross_section
 from rotate import rotate_img_and_point, rotate_plane
 from get_dicom import get_dcm_3d_array, window_transform_3d
 import centers_filter
-
+from scipy.interpolate import splprep, splev
+from scipy.spatial import distance, KDTree
 
 def get_args_parser():
     parser = argparse.ArgumentParser('', add_help=False)
@@ -30,13 +31,56 @@ def get_args_parser():
     return parser
 
 
+def nearest_neighbor_sort(points):
+    sorted_points = []
+    current_point = points[0]
+    sorted_points.append(current_point)
+    points = points[1:]  # 移除第一个点
+
+    while len(points) > 0:
+        # 找到最近的点
+        distances = np.linalg.norm(points - current_point, axis=1)
+        nearest_index = np.argmin(distances)
+        nearest_point = points[nearest_index]
+
+        # 将最近的点添加到已排序的列表
+        sorted_points.append(nearest_point)
+
+        # 从点集中移除最近的点
+        points = np.delete(points, nearest_index, axis=0)
+
+        # 更新当前点
+        current_point = nearest_point
+
+    return np.array(sorted_points)
+
+
+
+
+def create_smooth_curve(points, s=0, k=3):
+    if len(points) <= k:
+        k = max(1, len(points) - 1)  # k 至少为1
+    if len(points) < 2:
+        return points.T  # 返回原始点，不进行插值
+    tck, u = splprep([points[:, 0], points[:, 1]], s=s, k=k)
+    u_points = np.linspace(0, 1, 1000)
+    new_points = splev(u_points, tck)
+    return new_points
+
+
 def main(args) :
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     print(f"using {device} device.")
     
     dicom_dirs = [item.path for item in os.scandir(args.dicom_path) if item.is_dir()]
     dicom_dirs.sort()
-    
+    i = 0
+    # numbers = [dir.split('\\')[-1].split('_')[0]  for dir in dicom_dirs]
+    # 不能用split来划分文件名，
+    # 因为不同系统下的路径分隔可能不一样，改成os.path.split()
+    numbers = [os.path.split(dir)[-1].split('_')[0] for dir in dicom_dirs]
+    print(numbers)
+
     os.makedirs(f"{args.results_path}/auxiliary", exist_ok=True)
     os.makedirs(f"{args.results_path}/cross_section", exist_ok=True)
     os.makedirs(f"{args.results_path}/mip", exist_ok=True)
@@ -44,13 +88,14 @@ def main(args) :
     os.makedirs(f"{args.results_path}/auxiliary", exist_ok=True)
     os.makedirs(f"{args.results_path}/coronal", exist_ok=True)
     
-    for it in range(len(dicom_dirs)) :
+    for i in range(len(dicom_dirs)) :
+    # for i in range(len(numbers)):
         # get dicom file and adjustment value according to window
-        dicom_dir = list([item.path for item in os.scandir(dicom_dirs[it]) if item.is_dir()])[0]
+        dicom_dir = list([item.path for item in os.scandir(dicom_dirs[i]) if item.is_dir()])[0]
         dicom = get_dcm_3d_array(dicom_dir)
         
         # get cross section
-        cross_section = get_cross_section(dicom, if_vis=True, number=it, results_path=args.results_path)
+        cross_section = get_cross_section(dicom, if_vis=True, number=numbers[i], results_path=args.results_path)
         
         # build maskrcnn
         backbone = resnet50_fpn_backbone()
@@ -106,7 +151,7 @@ def main(args) :
                              alpha=1,
                              box_thresh=0.96)
             # 保存预测的图片结果
-            plot_img.save(f"{args.results_path}/instance_seg/{str(it+1).zfill(4)}_seg.png")
+            plot_img.save(f"{args.results_path}/instance_seg/{str(numbers[i]).zfill(4)}_seg.png")
 
             # 用连通区域函数获取牙齿中心
             centers = mask_tooth_center(cross_section, 
@@ -255,39 +300,113 @@ def main(args) :
             right_x_cross (array(5)) : point location X on right sections
             y_intercepts (array(5)) : point location Y on both sides sections
             '''
-            
+
             # 作图
             x_y_centers = x_y_centers.T
             left_centers = left_centers.T
             right_centers = right_centers.T
             plt.figure(figsize=(10, 10))
+            # plt.show()
             plt.imshow(cross_section, cmap=plt.cm.bone)
             plt.plot(left_centers[0], left_centers[1], 'ro')
             plt.plot(right_centers[0], right_centers[1], 'yo')
             plt.plot(x_y_centers[0][0], x_y_centers[1][0], 'bo')
             plt.plot(x_y_centers[0][3], x_y_centers[1][3], 'bo')
-            
-            plt.axhline(upper)
-            plt.axhline(bottom)
-            
+
+            # # 存储垂直线的数据
+            # left_lines = []
+            # right_lines = []
+
+            # 计算左侧牙齿数量
+            num_left_teeth = len(left_centers[0])
+
+            # 计算右侧牙齿数量
+            num_right_teeth = len(right_centers[0])
+
+            all_points_x = np.concatenate((left_centers[0], right_centers[0], x_y_centers[0]))
+            all_points_y = np.concatenate((left_centers[1], right_centers[1], x_y_centers[1]))
+
+            # 将点堆叠在一起
+            points = np.vstack((all_points_x, all_points_y)).T
+
+            # 按照点的顺序进行排序（这里假设顺序是重要的）
+            sorted_points = nearest_neighbor_sort(points)
+
+            # 使用样条插值来创建平滑曲线
+            tck, u = splprep([sorted_points[:, 0], sorted_points[:, 1]], s=0)
+            u_points = np.linspace(0, 1, 1000)
+            new_points = splev(u_points, tck)
+
+            # 将左侧点堆叠在一起
+            left_points = np.vstack((left_centers[0], left_centers[1])).T
+            sorted_left_points = nearest_neighbor_sort(left_points)
+            new_left_points = create_smooth_curve(sorted_left_points)
+            plt.plot(new_left_points[0], new_left_points[1], 'g-')
+            plt.scatter(sorted_left_points[:, 0], sorted_left_points[:, 1], color='green')
+
+            # 将右侧点堆叠在一起
+            right_points = np.vstack((right_centers[0], right_centers[1])).T
+            sorted_right_points = nearest_neighbor_sort(right_points)
+            new_right_points = create_smooth_curve(sorted_right_points)
+            plt.plot(new_right_points[0], new_right_points[1], 'g-')
+            plt.scatter(sorted_right_points[:, 0], sorted_right_points[:, 1], color='green')
+
+            # 将剩余点（x_y_centers）连成一条曲线
+            remaining_points = np.vstack((x_y_centers[0], x_y_centers[1])).T
+            sorted_remaining_points = nearest_neighbor_sort(remaining_points)
+            new_remaining_points = create_smooth_curve(sorted_remaining_points)
+            plt.plot(new_remaining_points[0], new_remaining_points[1], 'g-')
+            plt.scatter(sorted_remaining_points[:, 0], sorted_remaining_points[:, 1], color='green')
+
+            # 创建KDTree以便查找最近点
+            left_tree = KDTree(sorted_left_points)
+            right_tree = KDTree(sorted_right_points)
+
+            # 连接曲线的起点和终点到最近的牙弓曲线点
+            start_point = sorted_remaining_points[0]
+            end_point = sorted_remaining_points[-1]
+
+            left_dist_start, left_idx_start = left_tree.query(start_point)
+            right_dist_start, right_idx_start = right_tree.query(start_point)
+            left_dist_end, left_idx_end = left_tree.query(end_point)
+            right_dist_end, right_idx_end = right_tree.query(end_point)
+
+            if left_dist_start < right_dist_start:
+                nearest_start_point = sorted_left_points[left_idx_start]
+                plt.plot([start_point[0], nearest_start_point[0]], [start_point[1], nearest_start_point[1]], 'g--')
+            elif (right_idx_start > 0):
+                    nearest_start_point = sorted_right_points[right_idx_start]
+                    plt.plot([start_point[0], nearest_start_point[0]], [start_point[1], nearest_start_point[1]],
+                             'g--')
+
+            if left_dist_end < right_dist_end:
+                nearest_end_point = sorted_left_points[left_idx_end]
+                plt.plot([end_point[0], nearest_end_point[0]], [end_point[1], nearest_end_point[1]], 'g--')
+            elif (right_idx_start > 0):
+                nearest_end_point = sorted_right_points[right_idx_end]
+                plt.plot([end_point[0], nearest_end_point[0]], [end_point[1], nearest_end_point[1]], 'g--')
+
+            for it in range(section_num):
+                vals_x = np.linspace(left_x_cross[it] - 50, left_x_cross[it] + 50)
+                left_vals_y = left_intercepts[it] + left_slope * vals_x
+                plt.plot(vals_x, left_vals_y, '--', c='red')
+            for it in range(section_num):
+                vals_x = np.linspace(right_x_cross[it] - 50, right_x_cross[it] + 50)
+                right_vals_y = right_intercepts[it] + right_slope * vals_x
+                plt.plot(vals_x, right_vals_y, '--', c='red')
+
             vals_x = np.linspace(0, 512)
             left_vals_y = left_int + left_coe * vals_x
             plt.plot(vals_x, left_vals_y, '--', c='orange')
             right_vals_y = right_int + right_coe * vals_x
             plt.plot(vals_x, right_vals_y, '--', c='orange')
-            
-            for sec in range(section_num) :
-                vals_x = np.linspace(left_x_cross[sec] - 50, left_x_cross[sec] + 50)
-                left_vals_y = left_intercepts[sec] + left_slope * vals_x
-                plt.plot(vals_x, left_vals_y, '--', c='red')
-            for sec in range(section_num) :
-                vals_x = np.linspace(right_x_cross[sec] - 50, right_x_cross[sec] + 50)
-                right_vals_y = right_intercepts[sec] + right_slope * vals_x
-                plt.plot(vals_x, right_vals_y, '--', c='red')
+
+            plt.axhline(upper)
+            plt.axhline(bottom)
                 
             plt.xlim(0, 512)
             plt.ylim(512, 0)
-            plt.savefig(f"{args.results_path}/auxiliary/{str(it+1).zfill(4)}_direction.png")
+            plt.savefig(f"{args.results_path}/auxiliary/{str(numbers[i]).zfill(4)}_direction.png")
             # plt.show()
             plt.close()
             
@@ -296,7 +415,7 @@ def main(args) :
             dicom = get_dcm_3d_array(dicom_dir)
             dcm_3d_array = window_transform_3d(dicom, window_width=4000, window_center=1000)
             height, depth, width = dcm_3d_array.shape
-            os.makedirs(f"{args.results_path}/coronal/{str(it+1).zfill(4)}", exist_ok=True)
+            os.makedirs(f"{args.results_path}/coronal/{numbers[i]}", exist_ok=True)
             # 获取左侧截面
             for sec in range(section_num):
                 dcm_3d_new = copy.deepcopy(dcm_3d_array)
@@ -308,7 +427,7 @@ def main(args) :
                 # print(rotate_points)
                 col = int(rotate_points[sec][0])
                 result = rotate_plane(dcm_3d_new, angle, col, center_x, center_y)[::-1]
-                cv2.imencode(".png", result)[1].tofile(f"{args.results_path}/coronal/{str(it+1).zfill(4)}/left_{sec+1}.png")
+                cv2.imencode(".png", result)[1].tofile(f"{args.results_path}/coronal/{str(numbers[i]).zfill(4)}/left_{sec+1}.png")
             # 获取右侧截面
             for sec in range(section_num):
                 dcm_3d_new = copy.deepcopy(dcm_3d_array)
@@ -320,9 +439,12 @@ def main(args) :
                 # print(rotate_points)
                 col = int(rotate_points[sec][0])
                 result = rotate_plane(dcm_3d_new, angle, col, center_x, center_y)[::-1]
-                cv2.imencode(".png", result)[1].tofile(f"{args.results_path}/coronal/{str(it+1).zfill(4)}/right_{sec+1}.png")
-            
-        print(f"{str(it+1).zfill(4)} done! ")
+                os.makedirs(f"{args.results_path}/coronal/{str(numbers[i]).zfill(4)}", exist_ok=True)
+                cv2.imencode(".png", result)[1].tofile(f"{args.results_path}/coronal/{str(numbers[i]).zfill(4)}/right_{sec+1}.png")
+
+        if i < len(numbers):
+            i=i+1
+        print(f"{str(numbers[i-1]).zfill(4)} done! ")
 
 
 
